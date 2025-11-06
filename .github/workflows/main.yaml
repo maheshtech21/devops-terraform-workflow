@@ -1,0 +1,60 @@
+name: Deploy Infra and Configure App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  terraform:
+    uses: ./.github/workflows/shared-workflow.yaml
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  configure:
+    name: Configure EC2 & Verify ALB
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Get Terraform Outputs
+        run: |
+          echo "SSH_HOST_IP=${{ needs.terraform.outputs.sshhost_ip }}" >> $GITHUB_ENV
+          echo "PRIVATE_IP=${{ needs.terraform.outputs.private_ip }}" >> $GITHUB_ENV
+          echo "ALB_DNS=${{ needs.terraform.outputs.alb_dns }}" >> $GITHUB_ENV
+          echo "PEM_FILE=${{ needs.terraform.outputs.key_file }}" >> $GITHUB_ENV
+
+      - name: Install SSH client
+        run: sudo apt-get update && sudo apt-get install -y openssh-client
+
+      - name: Write PEM file from GitHub Secret
+        run: |
+          echo "${{ secrets.EC2_PEM_KEY }}" > devops-key.pem
+          chmod 600 devops-key.pem
+          echo "PEM_FILE=devops-key.pem" >> $GITHUB_ENV
+
+      - name: Upload index.html to SSH Host
+        run: |
+          echo "Uploading index.html to SSH Host..."
+          echo "${{ secrets.EC2_PEM_KEY }}" > devops-key.pem
+          chmod 600 devops-key.pem
+          scp -o StrictHostKeyChecking=no -i "$PEM_FILE" devops-key.pem ubuntu@$SSH_HOST_IP:/tmp/devops-key.pem
+          scp -o StrictHostKeyChecking=no -i "$PEM_FILE" index.html ubuntu@$SSH_HOST_IP:/tmp/index.html
+
+      - name: Configure Private EC2 from SSH Host
+        run: |
+          echo "Connecting from SSH Host to Private EC2..."
+          ssh -o StrictHostKeyChecking=no -i "$PEM_FILE" ubuntu@$SSH_HOST_IP <<EOF
+            scp -o StrictHostKeyChecking=no -i /tmp/devops-key.pem /tmp/index.html ubuntu@$PRIVATE_IP:/tmp/index.html || true
+            ssh -o StrictHostKeyChecking=no -i /tmp/devops-key.pem ubuntu@$PRIVATE_IP \
+            "sudo apt-get update -y && sudo apt-get install -y nginx && sudo mv /tmp/index.html /var/www/html/index.nginx-debian.html && sudo systemctl enable nginx && sudo systemctl restart nginx"
+            EOF
+
+      - name: Verify Application via ALB
+        run: |
+          echo "Verifying App via ALB: http://$ALB_DNS"
+          curl -I http://$ALB_DNS

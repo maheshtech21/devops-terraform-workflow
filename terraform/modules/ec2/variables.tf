@@ -1,0 +1,9 @@
+variable "project_name" { type = string }
+variable "ami_id" { type = string }
+variable "instance_type" { type = string }
+variable "public_subnet_id" { type = string }
+variable "private_subnet_id" { type = string }
+variable "public_sg_id" { type = string }
+variable "app_sg_id" { type = string }
+variable "aws_key_pair" { type = string }
+variable "iam_instance_profile" { type = string }

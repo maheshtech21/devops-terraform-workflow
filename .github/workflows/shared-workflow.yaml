@@ -1,0 +1,68 @@
+name: Shared Terraform Workflow
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+    outputs:
+      sshhost_ip:
+        description: "Public IP of SSH Host"
+        value: ${{ jobs.terraform.outputs.sshhost_ip }}
+      private_ip:
+        description: "Private IP of Private EC2"
+        value: ${{ jobs.terraform.outputs.private_ip }}
+      alb_dns:
+        description: "ALB DNS Name"
+        value: ${{ jobs.terraform.outputs.alb_dns }}
+      key_file:
+        description: "PEM Key file path"
+        value: ${{ jobs.terraform.outputs.key_file }}
+
+jobs:
+  terraform:
+    name: Terraform Deploy
+    runs-on: ubuntu-latest
+
+    outputs:
+      sshhost_ip: ${{ steps.get_outputs.outputs.sshhost_ip }}
+      private_ip: ${{ steps.get_outputs.outputs.private_ip }}
+      alb_dns: ${{ steps.get_outputs.outputs.alb_dns }}
+      key_file: ${{ steps.get_outputs.outputs.key_file }}
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Capture Terraform Outputs
+        id: get_outputs
+        working-directory: terraform
+        run: |
+          echo "sshhost_ip=$(terraform output -raw sshhost_public_ip)" >> $GITHUB_OUTPUT
+          echo "private_ip=$(terraform output -raw app_private_ip)" >> $GITHUB_OUTPUT
+          echo "alb_dns=$(terraform output -raw alb_dns_name)" >> $GITHUB_OUTPUT
+          echo "key_file=$(find . -maxdepth 1 -name '*.pem' | head -n 1)" >> $GITHUB_OUTPUT
